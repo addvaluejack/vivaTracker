@@ -15,16 +15,16 @@
 #ifndef __trackers__ktrackers__
 #define __trackers__ktrackers__
 
+#include <fstream>
 #include <vector>
 #include <functional>
 #include <opencv2/core/core.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/ml.hpp>
 #include "gradient.h"
 
 using namespace cv;
 using namespace std;
-
-
 
 // Gaussian & Polynomial == KCF
 // Linear = DCF

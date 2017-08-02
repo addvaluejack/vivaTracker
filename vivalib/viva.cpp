@@ -195,8 +195,11 @@ void Processor::run()
                        1000.0/double(duration) ,
                        _output_channel->getFrequency());
             
-            if (_showOutput && !frameOut.empty())
+            if (_showOutput && !frameOut.empty()) {
                 cv::imshow(_outputWindowName, frameOut);
+                //string filename = "R:\\images\\" + to_string(frameN) + ".jpg";
+                //cv::imwrite(filename, frameOut);
+            }
             if (_output)
                 _output_channel->addData(frameOut);
             

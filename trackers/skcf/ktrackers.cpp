@@ -18,6 +18,8 @@
 
 using namespace std;
 
+int file_index = 1;
+
 void KTrackers::setArea(const RotatedRect &rect)
 {
 
@@ -86,6 +88,7 @@ void KTrackers::processFrame(const cv::Mat &frame)
     Mat patch, filter;
     Mat kf, yf, kzf, alphaf;
     vector<Mat> xf,zf;
+    double maxVal = 1.0;
    
     Size sz(_target.windowSize.width/_params.cell_size,
             _target.windowSize.height/_params.cell_size);
@@ -119,7 +122,7 @@ void KTrackers::processFrame(const cv::Mat &frame)
                 break;
             }
         }
-        KTrackers::fastDetection(_target.model_alphaf, kzf, shift);
+        maxVal = KTrackers::fastDetection(_target.model_alphaf, kzf, shift);
         Point2f _shift(_params.cell_size * Point2f(shift.x, shift.y));
         _target.center = _target.center + _shift;
         
@@ -492,6 +495,83 @@ double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &m
     idft(response, spatial, DFT_SCALE | DFT_REAL_OUTPUT);
     double minVal; double maxVal; Point minLoc;
     minMaxLoc( spatial, &minVal, &maxVal, &minLoc, &maxLoc);
+    
+    float spatial_mean = 0;
+    for (int i = 0; i < spatial.rows; i++) {
+        for (int j = 0; j < spatial.cols; j++) {
+            spatial_mean += spatial.at<float>(i, j);
+        }
+    }
+    spatial_mean = spatial_mean /(spatial.rows*spatial.cols);
+
+    float spatial_variance = 0;
+    for (int i = 0; i < spatial.rows; i++) {
+        for (int j = 0; j < spatial.cols; j++) {
+            if (spatial.at<float>(i,j) > (spatial_mean+maxVal)/2)
+                spatial_variance++;
+        }
+    }
+    
+    cout << spatial_variance << endl;
+    ofstream file;
+    file.open("R:\\draw.txt", ios::app);
+    file << spatial_variance << endl;
+    file.close();
+
+    //ofstream file;
+    //string filename = "R:\\scores\\" + to_string(file_index) + ".txt";
+    //file.open(filename, ios::app);
+
+    //for (int i = 0; i < spatial.rows; i++) {
+    //    for (int j = 0; j < spatial.cols; j++) {
+    //        file << spatial.at<float>(i, j) << " ";
+    //    }
+    //    file << endl;
+    //}
+
+    //file << endl;
+    //file.close();
+    //file_index++;
+
+    //// prepare for samples
+    //Mat sample(spatial.rows*spatial.cols,3,CV_32FC1);
+    //int counter = 0;
+
+    //for (int i = 0; i < spatial.rows; i++) {
+    //    for (int j = 0; j < spatial.cols; j++) {
+    //        sample.at<float>(counter, 0) = i;
+    //        sample.at<float>(counter, 1) = j;
+    //        sample.at<float>(counter, 2) = spatial.at<float>(i, j)*1000;
+    //        counter++;
+    //    }
+    //}
+    //Mat means0(1, 3, CV_64F);
+    //means0.at<float>(0, 0) = maxLoc.x;
+    //means0.at<float>(0, 1) = maxLoc.y;
+    //means0.at<float>(0, 2) = maxVal;
+
+    //// create the gaussian model
+    //Ptr<ml::EM> em_model = ml::EM::create();
+    //Mat logLikelihoods, probs;
+    //em_model->setClustersNumber(1);
+    //em_model->setCovarianceMatrixType(ml::EM::COV_MAT_SPHERICAL);
+    //em_model->setTermCriteria(TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, 100, 0.1));
+    //em_model->trainE(sample, means0, noArray(), noArray(), logLikelihoods, noArray(), probs);
+
+    //ofstream file;
+    //string filename = "R:\\logLikelihoods\\" + to_string(file_index) + ".txt";
+    //file.open(filename, ios::out);
+    //double result = 0;
+
+    //for (int i = 0; i < logLikelihoods.rows; i++) {
+    //    file << logLikelihoods.at<double>(i) << " ";
+    //    if ((i+1)%spatial.cols == 0) {
+    //        file << endl;
+    //    }
+    //}
+
+    //file.close();
+    //file_index++;
     
     if (maxLoc.y > kzf.rows / 2)
         maxLoc.y -= kzf.rows;
