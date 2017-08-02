@@ -393,6 +393,33 @@ private:
     static float getMedianUnmanaged(float arr[], int n);
 };
 
+class Component {
+public:
+    vector<cv::Mat> mu_;
+    float pi_;
+
+    Component(vector<cv::Mat> &mu) {
+        mu_ = mu;
+        pi_ = 0.01;
+    }
+};
+
+class MixtureModel {
+    int limit_;
+public:
+    float pi_sum_;
+    vector<Component> components_;
+
+    MixtureModel() {
+        limit_ = 10;
+        pi_sum_ = 0;
+    }
+    void addComponets(vector<cv::Mat> &x);
+    float calculateDistance(int first, int second);
+    void mergeComponents(int first, int second);
+    void optimizeModel();
+    vector<cv::Mat> mixedComponents();
+};
 
 class KTrackers
 {
@@ -434,8 +461,10 @@ protected:
     TObj         _target;
     ConfigParams _params;
     KFlow        _flow;
+    MixtureModel gmm_;
     
     Point2f      _ptl;
+    int          initial_good_pixels_count_;
     
     
 private:
@@ -547,7 +576,8 @@ private:
     // the responses wrap around cyclically.
     static double fastDetection(const Mat &modelAlphaF,
                                 const Mat &kzf,
-                                Point &location);
+                                Point &location,
+                                int &initial_good_pixels_count);
     
     
     static void  getPatch(const Mat& image,
