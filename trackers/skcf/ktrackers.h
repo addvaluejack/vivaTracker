@@ -411,7 +411,7 @@ public:
     vector<Component> components_;
 
     MixtureModel() {
-        limit_ = 10;
+        limit_ = 6;
         pi_sum_ = 0;
     }
     void addComponets(vector<cv::Mat> &x);
@@ -577,7 +577,8 @@ private:
     static double fastDetection(const Mat &modelAlphaF,
                                 const Mat &kzf,
                                 Point &location,
-                                int &initial_good_pixels_count);
+                                int &initial_good_pixels_count,
+                                bool &should_learn_or_not);
     
     
     static void  getPatch(const Mat& image,

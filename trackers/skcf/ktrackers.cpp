@@ -88,7 +88,8 @@ void KTrackers::processFrame(const cv::Mat &frame)
     Mat patch, filter;
     Mat kf, yf, kzf, alphaf;
     vector<Mat> xf,zf;
-    double maxVal = 1.0;
+    double maxVal;
+    bool should_learn_or_not;
    
     Size sz(_target.windowSize.width/_params.cell_size,
             _target.windowSize.height/_params.cell_size);
@@ -105,34 +106,38 @@ void KTrackers::processFrame(const cv::Mat &frame)
         KTrackers::fft2(zf, _params);
         
         maxVal = 0;
-        for (int i = 0; i < gmm_.components_.size(); i++) {
-            vector<Mat> tmpf = gmm_.components_[i].mu_;
-            cv::Point tmpShift;
+        should_learn_or_not = false;
+        //for (int i = 0; i < gmm_.components_.size(); i++) {
+            //vector<Mat> tmpf = gmm_.components_[i].mu_;
+            //cv::Point tmpShift;
 
             switch (_params.kernel_type)
             {
             case KType::GAUSSIAN:
             {
-                KTrackers::gaussian_correlation(zf, tmpf, _params, kzf, false);
+                KTrackers::gaussian_correlation(zf, _target.model_xf, _params, kzf, false);
                 break;
             }
             case KType::POLYNOMIAL:
             {
-                KTrackers::polynomial_correlation(zf, tmpf, _params, kzf);
+                KTrackers::polynomial_correlation(zf, _target.model_xf, _params, kzf);
                 break;
             }
             case KType::LINEAR:
             {
-                KTrackers::linear_correlation(zf, tmpf, kzf);
+                KTrackers::linear_correlation(zf, _target.model_xf, kzf);
                 break;
             }
             }
-            float tmpVal = KTrackers::fastDetection(_target.model_alphaf, kzf, tmpShift, initial_good_pixels_count_) / (gmm_.components_[i].pi_ / gmm_.pi_sum_);
-            if (tmpVal > maxVal) {
-                maxVal = tmpVal;
-                shift = tmpShift;
-            }
-        }
+            maxVal = KTrackers::fastDetection(_target.model_alphaf, kzf, shift, initial_good_pixels_count_, should_learn_or_not);
+        cout << (should_learn_or_not? "Yes":"No") << endl;
+        //}
+
+        //if (!should_learn_or_not) {
+        //    shift.x = 0;
+        //    shift.y = 0;
+        //}
+
         Point2f _shift(_params.cell_size * Point2f(shift.x, shift.y));
         _target.center = _target.center + _shift;
         
@@ -200,13 +205,13 @@ void KTrackers::processFrame(const cv::Mat &frame)
         _target.model_xf     = xf;
         _target.model_alphaf = alphaf;
         _target.initiated    = true;
-        gmm_.addComponets(xf);
+        //gmm_.addComponets(xf);
     }
-    else
+    else //if (should_learn_or_not)
     {
         KTrackers::learn(_target.model_xf, xf, _target.model_alphaf, alphaf, _params);
-        gmm_.addComponets(xf);
-        gmm_.optimizeModel();
+        //gmm_.addComponets(xf);
+        //gmm_.optimizeModel();
     }
     
 }
@@ -496,7 +501,7 @@ void KTrackers::learn(vector<Mat> &modelXf, const vector<Mat> &xf,
     weightPara(Range(0, xf.size()));
 }
 
-double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &maxLoc, int &initial_good_pixels_count)
+double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &maxLoc, int &initial_good_pixels_count, bool &should_learn_or_not)
 {
     Mat response, spatial;
     mulSpectrums(modelAlphaF, kzf, response, 0, false);
@@ -520,15 +525,19 @@ double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &m
         }
     }
 
-    //if (initial_good_pixels_count == -1) {
-    //    initial_good_pixels_count = good_pixels_count;
-    //} else {
-    //    if (good_pixels_count > initial_good_pixels_count*3) {
-    //        maxVal = -1;
-    //    } else {
-    //        maxVal = 1;
-    //    }
-    //}
+    if (initial_good_pixels_count == -1) {
+        initial_good_pixels_count = good_pixels_count;
+        should_learn_or_not = true;
+    } else {
+        if (good_pixels_count < initial_good_pixels_count*3) {
+            should_learn_or_not = true;
+        }
+    }
+
+    //ofstream file;
+    //file.open("R:\\draw.txt", ios::app);
+    //file << initial_good_pixels_count << " " << good_pixels_count << endl;
+    //file.close();
 
     if (maxLoc.y > kzf.rows / 2)
         maxLoc.y -= kzf.rows;
@@ -1609,6 +1618,12 @@ void MixtureModel::optimizeModel() {
             }
         }
     }
+    
+    ofstream file;
+    file.open("R:\\draw.txt", ios::app);
+    file << first << " " << second << endl;
+    file.close();
+
     mergeComponents(first, second);
 
     return;
