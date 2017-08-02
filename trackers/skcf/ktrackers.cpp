@@ -133,10 +133,10 @@ void KTrackers::processFrame(const cv::Mat &frame)
         cout << (should_learn_or_not? "Yes":"No") << endl;
         //}
 
-        //if (!should_learn_or_not) {
-        //    shift.x = 0;
-        //    shift.y = 0;
-        //}
+        if (!should_learn_or_not) {
+            shift.x = 0;
+            shift.y = 0;
+        }
 
         Point2f _shift(_params.cell_size * Point2f(shift.x, shift.y));
         _target.center = _target.center + _shift;
@@ -529,7 +529,8 @@ double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &m
         initial_good_pixels_count = good_pixels_count;
         should_learn_or_not = true;
     } else {
-        if (good_pixels_count < initial_good_pixels_count*3) {
+        if (good_pixels_count < initial_good_pixels_count*4) {
+        // the condition statement is the key
             should_learn_or_not = true;
         }
     }
