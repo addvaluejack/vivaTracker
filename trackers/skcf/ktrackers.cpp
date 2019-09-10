@@ -18,8 +18,6 @@
 
 using namespace std;
 
-int file_index = 1;
-
 void KTrackers::setArea(const RotatedRect &rect)
 {
 
@@ -88,8 +86,6 @@ void KTrackers::processFrame(const cv::Mat &frame)
     Mat patch, filter;
     Mat kf, yf, kzf, alphaf;
     vector<Mat> xf,zf;
-    double maxVal;
-    bool should_learn_or_not;
    
     Size sz(_target.windowSize.width/_params.cell_size,
             _target.windowSize.height/_params.cell_size);
@@ -105,39 +101,25 @@ void KTrackers::processFrame(const cv::Mat &frame)
         KTrackers::getFeatures(patch, _params, filter, zf);
         KTrackers::fft2(zf, _params);
         
-        maxVal = 0;
-        should_learn_or_not = false;
-        //for (int i = 0; i < gmm_.components_.size(); i++) {
-            //vector<Mat> tmpf = gmm_.components_[i].mu_;
-            //cv::Point tmpShift;
-
-            switch (_params.kernel_type)
-            {
+        switch (_params.kernel_type)
+        {
             case KType::GAUSSIAN:
             {
-                KTrackers::gaussian_correlation(zf, _target.model_xf, _params, kzf, false);
+                KTrackers::gaussian_correlation(zf, _target.model_xf,_params, kzf, false);
                 break;
             }
             case KType::POLYNOMIAL:
             {
-                KTrackers::polynomial_correlation(zf, _target.model_xf, _params, kzf);
+                KTrackers::polynomial_correlation(zf, _target.model_xf,_params, kzf);
                 break;
             }
             case KType::LINEAR:
             {
-                KTrackers::linear_correlation(zf, _target.model_xf, kzf);
+                KTrackers::linear_correlation(zf,_target.model_xf, kzf);
                 break;
             }
-            }
-            maxVal = KTrackers::fastDetection(_target.model_alphaf, kzf, shift, initial_good_pixels_count_, should_learn_or_not);
-        cout << (should_learn_or_not? "Yes":"No") << endl;
-        //}
-
-        if (!should_learn_or_not) {
-            shift.x = 0;
-            shift.y = 0;
         }
-
+        KTrackers::fastDetection(_target.model_alphaf, kzf, shift);
         Point2f _shift(_params.cell_size * Point2f(shift.x, shift.y));
         _target.center = _target.center + _shift;
         
@@ -205,19 +187,19 @@ void KTrackers::processFrame(const cv::Mat &frame)
         _target.model_xf     = xf;
         _target.model_alphaf = alphaf;
         _target.initiated    = true;
-        //gmm_.addComponets(xf);
+        
     }
-    else //if (should_learn_or_not)
+    else
     {
         KTrackers::learn(_target.model_xf, xf, _target.model_alphaf, alphaf, _params);
-        //gmm_.addComponets(xf);
-        //gmm_.optimizeModel();
     }
+    
+    
     
 }
 
 KTrackers::KTrackers(KType type, KFeat feat, bool scale):
-_target(), _params(type, scale),  _ptl(0.,0.), initial_good_pixels_count_(-1)
+_target(), _params(type, scale),  _ptl(0.,0.)
 {
     
     switch (feat) {
@@ -247,8 +229,10 @@ _target(), _params(type, scale),  _ptl(0.,0.), initial_good_pixels_count_(-1)
             break;
         }
     }
-    gmm_ = MixtureModel();
 }
+
+
+
 
 void KTrackers::divSpectrums( InputArray _srcA, InputArray _srcB,
                    OutputArray _dst, int flags, bool conjB  ,double lambda)
@@ -501,7 +485,7 @@ void KTrackers::learn(vector<Mat> &modelXf, const vector<Mat> &xf,
     weightPara(Range(0, xf.size()));
 }
 
-double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &maxLoc, int &initial_good_pixels_count, bool &should_learn_or_not)
+double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &maxLoc)
 {
     Mat response, spatial;
     mulSpectrums(modelAlphaF, kzf, response, 0, false);
@@ -509,37 +493,6 @@ double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &m
     double minVal; double maxVal; Point minLoc;
     minMaxLoc( spatial, &minVal, &maxVal, &minLoc, &maxLoc);
     
-    float spatial_mean = 0;
-    for (int i = 0; i < spatial.rows; i++) {
-        for (int j = 0; j < spatial.cols; j++) {
-            spatial_mean += spatial.at<float>(i, j);
-        }
-    }
-    spatial_mean = spatial_mean /(spatial.rows*spatial.cols);
-
-    float good_pixels_count = 0;
-    for (int i = 0; i < spatial.rows; i++) {
-        for (int j = 0; j < spatial.cols; j++) {
-            if (spatial.at<float>(i,j) > (spatial_mean+maxVal)/2)
-                good_pixels_count++;
-        }
-    }
-
-    if (initial_good_pixels_count == -1) {
-        initial_good_pixels_count = good_pixels_count;
-        should_learn_or_not = true;
-    } else {
-        if (good_pixels_count < initial_good_pixels_count*4) {
-        // the condition statement is the key
-            should_learn_or_not = true;
-        }
-    }
-
-    //ofstream file;
-    //file.open("R:\\draw.txt", ios::app);
-    //file << initial_good_pixels_count << " " << good_pixels_count << endl;
-    //file.close();
-
     if (maxLoc.y > kzf.rows / 2)
         maxLoc.y -= kzf.rows;
     if (maxLoc.x > kzf.cols / 2)
@@ -1525,123 +1478,3 @@ float KFlow::getMedian(float arr[], int n)
     return median;
 }
 
-/**
-* Add a componet into the Gaussian Mixture Model
-* @param x a single data point
-*/
-void MixtureModel::addComponets(vector<cv::Mat> &x) {
-    if (!x.empty()) {
-        components_.push_back(Component(x));
-        pi_sum_ += 0.01;
-    }
-
-    return;
-}
-
-/**
-* Calculate two gaussian componets' distance
-* @param first componet's index in componets vector
-* @param second componet's index in componets vector
-*/
-float MixtureModel::calculateDistance(int first, int second) {
-    float distance = 0;
-    int height = components_[first].mu_[0].size().height;
-    int width = components_[first].mu_[0].size().width;
-
-    for (int k = 0; k < components_[first].mu_.size(); k++) {
-        // same density everywhere
-
-        for (int r = 0; r < components_[first].mu_[k].size().height; r = r + 5) {
-            for (int c = 0; c < components_[first].mu_[k].size().width; c = c + 5) {
-                float dif = (components_[first].mu_[k].at<float>(r, c) - components_[second].mu_[k].at<float>(r, c));
-                distance += dif * dif;
-            }
-        }
-
-
-        // higher density in the center
-        /*
-        int step_distance_exponent = 0;
-        float dif = (components_[first].mu_[k].at<float>(height/2, width/2) - components_[second].mu_[k].at<float>(height/2, width/2));
-        distance += dif * dif;
-
-        for (; pow(2, step_distance_exponent) < height/2; step_distance_exponent++) {
-        for (int i = -1; i < 2; i++) {
-        for (int j = -1; j < 2; j++) {
-        float dif = (components_[first].mu_[k].at<float>(height/2 + i*pow(2, step_distance_exponent), width/2 + j*pow(2, step_distance_exponent)) - components_[second].mu_[k].at<float>(height / 2 + i*pow(2, step_distance_exponent), width / 2 + j*pow(2, step_distance_exponent)));
-        distance += dif * dif;
-        }
-        }
-        }
-        */
-    }
-
-    return distance;
-}
-
-/**
-* Merge two gaussian componets into one.
-* @param first componet's index in componets vector
-* @param second componet's index in componets vector
-*/
-void MixtureModel::mergeComponents(int first, int second) {
-    float new_pi = components_[first].pi_ + components_[second].pi_;
-
-    for (int k = 0; k < components_[first].mu_.size(); k++) {
-        addWeighted(components_[first].mu_[k], components_[first].pi_ / new_pi, components_[second].mu_[k], components_[second].pi_ / new_pi, 0, components_[first].mu_[k]);
-    }
-    components_[first].pi_ = new_pi;
-    components_.erase(components_.begin() + second);
-
-    return;
-}
-
-/**
-* Optimize the model by merge two closest componets into one.
-*/
-void MixtureModel::optimizeModel() {
-    if (components_.size() <= limit_) {
-        return;
-    }
-
-    int first = components_.size() - 2;
-    int second = first + 1;
-    float min_distance = calculateDistance(first, second);
-
-    for (int i = 0; i < components_.size() - 1; i++) {
-        for (int j = i + 1; j < components_.size(); j++) {
-            float tmp_distance = calculateDistance(i, j);
-
-            if (tmp_distance < min_distance) {
-                min_distance = tmp_distance;
-                first = i;
-                second = j;
-            }
-        }
-    }
-    
-    ofstream file;
-    file.open("R:\\draw.txt", ios::app);
-    file << first << " " << second << endl;
-    file.close();
-
-    mergeComponents(first, second);
-
-    return;
-}
-
-vector<cv::Mat> MixtureModel::mixedComponents() {
-    vector<cv::Mat> result;
-
-    for (int j = 0; j < components_[0].mu_.size(); j++) {
-        cv::Mat tmp = components_[0].mu_[j] * components_[0].pi_;
-
-        for (int i = 1; i < components_.size(); i++) {
-            tmp += components_[i].mu_[j] * components_[i].pi_;
-        }
-
-        result.push_back(tmp / pi_sum_);
-    }
-
-    return result;
-}
