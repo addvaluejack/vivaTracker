@@ -44,11 +44,14 @@ void GroundTruth::create(const string &file, const vector<vector<Point2f> > &gt)
     outfile.open(file.c_str());
     for (size_t i = 0; i < gt.size(); i++)
     {
+        /*
         for (size_t k = 0; k < gt[i].size(); k++)
         {
             outfile <<  (float)gt[i][k].x << ", " <<
                         (float)gt[i][k].y << ((k == (gt[i].size()-1))?"":", ");
-        }
+        
+        */
+        outfile << (float)gt[i][0].x << "," << (float)gt[i][1].y << "," << (float)gt[i][2].x-(float)gt[i][1].x << "," << (float)gt[i][0].y-(float)gt[i][1].y;
         outfile << std::endl;
     }
     outfile.close();

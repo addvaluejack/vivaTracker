@@ -17,6 +17,8 @@
 
 #include <vector>
 #include <functional>
+#include <fstream>
+#include <iomanip>
 #include <opencv2/core/core.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
 #include "gradient.h"
@@ -52,7 +54,7 @@ struct ConfigParams{
     int flags   = 0;
     
     // used for multiple components
-    int limit_of_components = 2;
+    int limit_of_components = 3;
 
     ConfigParams(KType ktype, bool compScale):
     padding(1.5), lambda(1e-4), output_sigma_factor(0.1),
@@ -118,7 +120,7 @@ struct FHOGConfigParams: public ConfigParams {
     FHOGConfigParams(KType kernel_t, bool scale): ConfigParams(kernel_t, scale)
     {
         kernel_feature   = KFeat::FHOG;
-        interp_factor    = 0.075;
+        interp_factor    = 0.02;
         kernel_sigma     = 0.5;
         kernel_poly_a    = 1;
         kernel_poly_b    = 9;
@@ -132,10 +134,11 @@ struct TObj{
     bool                initiated = false;
     Size2i              windowSize;   // Optimal window size for fft performance
     Size2d              size;   // Current size of the object
-    Point2f             center;   // Center location of the object
-    vector<vector<Mat>> models_xf;   // Fourier Domain: model of the tracking obj.
-    vector<Mat>         models_alphaf;   // Fourier Domain: Kernel Ridge Regression.
-    vector<double>      models_weight;
+    int                 activated_candidate_index;
+    vector<Point2f>     candidates_centers;   // Center location of the object
+    vector<vector<Mat>> candidates_xfs;   // Fourier Domain: models of the tracking obj.
+    vector<Mat>         candidates_alphafs;   // Fourier Domain: Kernels Ridge Regression.
+    vector<double>      candidates_weights;
     Mat                 distance_matrix;
     Mat                 gram_matrix;
 };
@@ -407,6 +410,7 @@ public:
     
     void setArea(const RotatedRect &rect);
     void getTrackedArea(vector<Point2f> &pts);
+    void getAdditionalInfo(vector<vector<Point2f>> &filters_pts, vector<double> &filters_weights, int &actived_filter);
     void processFrame(const cv::Mat &frame);
     
     void getTrackedPoints(vector<Point2f> &pts)
@@ -442,7 +446,6 @@ protected:
     
     Point2f      _ptl;
     int          _current_frame_index;
-    
     
 private:
     template<typename T>

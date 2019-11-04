@@ -81,6 +81,12 @@ public:
     }
     
     //@Override
+    void virtual getAdditionalInfo(vector<vector<Point2f>> &filters_pts, vector<double> &filters_weights, int &actived_filter)
+    {
+        kcf.getAdditionalInfo(filters_pts, filters_weights, actived_filter);
+    }
+
+    //@Override
     void processFrame(const cv::Mat &frame)
     {
         kcf.processFrame(frame);

@@ -56,7 +56,9 @@ public:
    * @param vector<Point2f> &pts. The tracked area will be filled  in this vector
    */
   void virtual getTrackedArea(vector<Point2f> &pts) = 0;
-    
+  
+  void virtual getAdditionalInfo(vector<vector<Point2f>> &filters_pts, vector<double> &filters_weights, int &actived_filter) = 0;
+
   /**
    * Initialize the tracker using the first image with the selected area
    * using two points. The two points create a rectangular selection inside the image.

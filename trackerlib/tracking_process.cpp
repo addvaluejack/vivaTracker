@@ -143,7 +143,20 @@ void TrackingProcess::operator()(const size_t frameN, const Mat &frame, Mat &out
         
         vector<Point2f> trackedArea;
         tracker->getTrackedArea(trackedArea);
-        Draw::drawQuadrangle(output, trackedArea, Color::red);
+        //Draw::drawQuadrangle(output, trackedArea, Color::red);
+        vector<vector<Point2f>> candidates_centers;
+        vector<double> weights;
+        int activated_candidate_index;
+        tracker->getAdditionalInfo(candidates_centers, weights, activated_candidate_index);
+        for (int i = 0; i < candidates_centers.size(); i++) {
+            Scalar boxes_color = Color::yellow;
+            if (i == activated_candidate_index) {
+                boxes_color = Color::red;
+            }
+            Draw::drawQuadrangle(output, candidates_centers[i], boxes_color);
+            putText(output, to_string(i), candidates_centers[i][2], FONT_HERSHEY_SIMPLEX, 1, boxes_color);
+            //putText(output, to_string(), Point2f(), FONT_HERSHEY_SIMPLEX, 1, boxes_color)
+        }
         if (frameN == execution.size())
             execution.push_back(trackedArea);
         

@@ -23,23 +23,38 @@ void KTrackers::setArea(const RotatedRect &rect)
 
     _target.initiated = false;
     _target.size = rect.size;
-    _target.center = rect.center;
     //int w = getOptimalDFTSize(floor(_target.size.width  * ( 1 + _params.padding)));//getOptimalDFTSize
     //int h = getOptimalDFTSize(floor(_target.size.height * ( 1 + _params.padding)));//getOptimalDFTSize
     int w = (floor(_target.size.width  * (1 + _params.padding)));//getOptimalDFTSize
     int h = (floor(_target.size.height * (1 + _params.padding)));//getOptimalDFTSize
     _target.windowSize = Size(w, h);
-    _target.models_xf.clear();
-    _target.models_alphaf.clear();
-    _target.models_weight.clear();
+    _target.activated_candidate_index = 0;
+    _target.candidates_centers.clear();
+    _target.candidates_centers.push_back(rect.center);
+    _target.candidates_xfs.clear();
+    _target.candidates_alphafs.clear();
+    _target.candidates_weights.clear();
 }
 
 void KTrackers::getTrackedArea(vector<Point2f> &pts)
 {
     pts.resize(4);
-    RotatedRect area(_target.center, _target.size, 0);
+    RotatedRect area(_target.candidates_centers[_target.activated_candidate_index], _target.size, 0);
     area.points(&pts[0]);
 
+}
+
+void KTrackers::getAdditionalInfo(vector<vector<Point2f>> &filters_pts, vector<double> &filters_weights, int &actived_filter)
+{
+    for (int i = 0; i < _target.candidates_weights.size(); i++)
+    {
+        filters_pts.push_back(vector<Point2f>());
+        filters_pts[i].resize(4);
+        RotatedRect area(_target.candidates_centers[i], _target.size, 0);
+        area.points(&filters_pts[i][0]);
+        filters_weights.push_back(_target.candidates_weights[i]);
+    }
+    actived_filter = _target.activated_candidate_index;
 }
 
 void KTrackers::getPoints(
@@ -55,7 +70,7 @@ void KTrackers::getPoints(
     assert(patch.type() == CV_32FC1 || patch.type() == CV_8UC1);
 
     Rect iRoi(0, 0, image.cols, image.rows);
-    Rect tRoi(obj.center.x - floor(obj.windowSize.width / 2), obj.center.y - floor(obj.windowSize.height / 2),
+    Rect tRoi(obj.candidates_centers[obj.activated_candidate_index].x - floor(obj.windowSize.width / 2), obj.candidates_centers[obj.activated_candidate_index].y - floor(obj.windowSize.height / 2),
         obj.windowSize.width, obj.windowSize.height);
     Rect fRoi = iRoi & tRoi;
     patchTL = fRoi.tl();
@@ -96,15 +111,15 @@ void KTrackers::processFrame(const cv::Mat &frame)
 
     if (_target.initiated)
     {
-        Point2f _shift;
-        KTrackers::getPatch(frame, _target.center, _target.windowSize, patch);
+        Point2f _last_center = _target.candidates_centers[_target.activated_candidate_index];
+        KTrackers::getPatch(frame, _target.candidates_centers[_target.activated_candidate_index], _target.windowSize, patch);
         KTrackers::hannWindow(sz, filter);
         KTrackers::getFeatures(patch, _params, filter, zf);
         KTrackers::fft2(zf, _params);
         int i;
         double maxMaxVal;
 
-        for (i = 0; i < _target.models_xf.size(); i++) {
+        for (i = 0; i < _target.candidates_xfs.size(); i++) {
             double maxVal;
             Point shift;
 
@@ -112,33 +127,33 @@ void KTrackers::processFrame(const cv::Mat &frame)
             {
             case KType::GAUSSIAN:
             {
-                KTrackers::gaussian_correlation(zf, _target.models_xf[i], _params, kzf, false);
+                KTrackers::gaussian_correlation(zf, _target.candidates_xfs[i], _params, kzf, false);
                 break;
             }
             case KType::POLYNOMIAL:
             {
-                KTrackers::polynomial_correlation(zf, _target.models_xf[i], _params, kzf);
+                KTrackers::polynomial_correlation(zf, _target.candidates_xfs[i], _params, kzf);
                 break;
             }
             case KType::LINEAR:
             {
-                KTrackers::linear_correlation(zf, _target.models_xf[i], kzf);
+                KTrackers::linear_correlation(zf, _target.candidates_xfs[i], kzf);
                 break;
             }
             }
-            maxVal = KTrackers::fastDetection(_target.models_alphaf[i], kzf, shift, _current_frame_index);
-            if (i > 0 && maxVal <= maxMaxVal) {
+            maxVal = KTrackers::fastDetection(_target.candidates_alphafs[i], kzf, shift, _current_frame_index);
+            _target.candidates_centers[i].x = _last_center.x + _params.cell_size * shift.x;
+            _target.candidates_centers[i].y = _last_center.y + _params.cell_size * shift.y;
+            if (i > 0 && maxMaxVal >= maxVal) {
                 continue;
             }
             maxMaxVal = maxVal;
-            _shift.x = _params.cell_size * shift.x;
-            _shift.y = _params.cell_size * shift.y;
+            _target.activated_candidate_index = i;
         }
-        _target.center = _target.center + _shift;
 
         if (_params.scale)
         {
-            _flow.processFrame(patch, filter, _target.size, _shift);
+            _flow.processFrame(patch, filter, _target.size, _target.candidates_centers[_target.activated_candidate_index]- _last_center);
             double scale = _flow.getScale();
             _target.size = Size2d(min((double)_target.windowSize.width, (_target.size.width * scale)),
                 min((double)_target.windowSize.height, (_target.size.height * scale)));
@@ -157,14 +172,14 @@ void KTrackers::processFrame(const cv::Mat &frame)
     KTrackers::gaussian_shaped_labels(sigma, sz, yf);
     KTrackers::fft2(yf, _params);
 
-    KTrackers::getPatch(frame, _target.center, _target.windowSize, patch);
+    KTrackers::getPatch(frame, _target.candidates_centers[_target.activated_candidate_index], _target.windowSize, patch);
 
     if (_params.scale)
     {
         _flow.extractPoints(patch, _target.size);
 
-        _ptl.x = _target.center.x - floor(_target.windowSize.width / 2);
-        _ptl.y = _target.center.y - floor(_target.windowSize.height / 2);
+        _ptl.x = _target.candidates_centers[_target.activated_candidate_index].x - floor(_target.windowSize.width / 2);
+        _ptl.y = _target.candidates_centers[_target.activated_candidate_index].y - floor(_target.windowSize.height / 2);
     }
     //    else
     //    {
@@ -200,13 +215,15 @@ void KTrackers::processFrame(const cv::Mat &frame)
         //_target.model_xf     = xf;
         //_target.model_alphaf = alphaf;
         //_target.initiated    = true;
-        _target.models_xf.push_back(xf);
-        _target.models_alphaf.push_back(alphaf);
-        _target.models_weight.push_back(1);
+        _target.candidates_centers[_target.activated_candidate_index] = _target.candidates_centers[_target.activated_candidate_index]; // mock
+        _target.candidates_xfs.push_back(xf);
+        _target.candidates_alphafs.push_back(alphaf);
+        _target.candidates_weights.push_back(1);
         _target.initiated = true;
         _target.gram_matrix.at<cv::Vec<float, 2>>(0, 0) = cv::Vec<float, 2>(calGram(xf, xf, _params), 0);
+        _target.activated_candidate_index = 0;
     }
-    else
+    else if (_current_frame_index % 5 == 0)
     {
         //KTrackers::learn(_target.model_xf, xf, _target.model_alphaf, alphaf, _params);
         KTrackers::updateModels(xf, alphaf);
@@ -533,7 +550,21 @@ double KTrackers::fastDetection(const Mat &modelAlphaF, const Mat &kzf, Point &m
     if (maxLoc.x > kzf.cols / 2)
         maxLoc.x -= kzf.cols;
 
-    return maxVal;
+    /* writing three files for every frame
+    ofstream myfile;
+    ostringstream _current_frame_index_for_file;
+    _current_frame_index_for_file << std::setw(6) << std::setfill('0') << _current_frame_index;
+    myfile.open("R:/spatial/" + _current_frame_index_for_file.str() + ".txt");
+    for (int i = 0; i < spatial.rows; i++) {
+        for (int j = 0; j < spatial.cols; j++) {
+            myfile << spatial.at<float>(i, j);
+            myfile << " ";
+        }
+        myfile << "\n";
+    }
+    myfile.close();*/
+
+    return maxVal/cv::mean(spatial)[0];
 }
 
 void  KTrackers::gaussianWindow(const Size &sz, float sigmaW, float sigmaH, Mat &filter)
@@ -1552,13 +1583,13 @@ void KTrackers::updateModels(vector<Mat> &xf, Mat &alphaf) {
     int i, j;
 
     // calculate gram and distance
-    for (i = 0; i < _target.models_xf.size(); i++) {
-        gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(xf, _target.models_xf[i], _params), 0);
+    for (i = 0; i < _target.candidates_xfs.size(); i++) {
+        gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(xf, _target.candidates_xfs[i], _params), 0);
     }
     for (; i < _params.limit_of_components; i++) {
         gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(std::numeric_limits<float>::infinity(), 0);
     }
-    for (i = 0; i < _target.models_xf.size(); i++) {
+    for (i = 0; i < _target.candidates_xfs.size(); i++) {
         // a^2 + b^2 - 2*a*b
         distance_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(new_norm + _target.gram_matrix.at<cv::Vec<float, 2>>(i, i)[0] - 2 * gram_vector.at<cv::Vec<float, 2>>(0, i)[0], 0);
     }
@@ -1567,17 +1598,18 @@ void KTrackers::updateModels(vector<Mat> &xf, Mat &alphaf) {
     }
 
     // update strategy
-    if (_target.models_xf.size() < _params.limit_of_components) {
+    if (_target.candidates_xfs.size() < _params.limit_of_components) {
         // Case 1
-        _target.models_xf.push_back(xf);
-        _target.models_alphaf.push_back(alphaf);
-        for (i = 0; i < _target.models_xf.size() - 1; i++) {
-            _target.models_weight[i] = _target.models_weight[i] * (1.0 - _params.interp_factor);
+        _target.candidates_xfs.push_back(xf);
+        _target.candidates_alphafs.push_back(alphaf);
+        _target.candidates_centers.push_back(Point2f());
+        for (i = 0; i < _target.candidates_xfs.size() - 1; i++) {
+            _target.candidates_weights[i] = _target.candidates_weights[i] * (1.0 - _params.interp_factor);
         }
-        _target.models_weight.push_back(_params.interp_factor);
+        _target.candidates_weights.push_back(_params.interp_factor);
         // Case 1 modify gram matrix and distance matrix
-        updateGramMatrix(gram_vector, _target.models_xf.size() - 1);
-        updateDistanceMatrix(distance_vector, _target.models_xf.size() - 1);
+        updateGramMatrix(gram_vector, _target.candidates_xfs.size() - 1);
+        updateDistanceMatrix(distance_vector, _target.candidates_xfs.size() - 1);
     }
     else {
         float min_distance_vector = distance_vector.at<cv::Vec<float, 2>>(0, 0)[0];
@@ -1602,17 +1634,17 @@ void KTrackers::updateModels(vector<Mat> &xf, Mat &alphaf) {
         }
 
         for (i = 0; i < _params.limit_of_components; i++) {
-            _target.models_weight[i] = _target.models_weight[i] * (1.0 - _params.interp_factor);
+            _target.candidates_weights[i] = _target.candidates_weights[i] * (1.0 - _params.interp_factor);
         }
         if (min_distance_vector < min_distance_matrix) {
             // Case 3
-            _target.models_weight[min_distance_vector_index] = _target.models_weight[min_distance_vector_index] + _params.interp_factor;
-            mergeWeighted(_target.models_xf[min_distance_vector_index], xf, _target.models_alphaf[min_distance_vector_index], alphaf, 1 - _params.interp_factor / _target.models_weight[min_distance_vector_index], _params.interp_factor / _target.models_weight[min_distance_vector_index]);
+            _target.candidates_weights[min_distance_vector_index] = _target.candidates_weights[min_distance_vector_index] + _params.interp_factor;
+            mergeWeighted(_target.candidates_xfs[min_distance_vector_index], xf, _target.candidates_alphafs[min_distance_vector_index], alphaf, 1 - _params.interp_factor / _target.candidates_weights[min_distance_vector_index], _params.interp_factor / _target.candidates_weights[min_distance_vector_index]);
             // Case 3 modify gram matrix and distance matrix
             for (i = 0; i < _params.limit_of_components; i++) {
-                gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(_target.models_xf[min_distance_vector_index], _target.models_xf[i], _params), 0);
+                gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(_target.candidates_xfs[min_distance_vector_index], _target.candidates_xfs[i], _params), 0);
             }
-            new_norm = calGram(_target.models_xf[min_distance_vector_index], _target.models_xf[min_distance_vector_index], _params);
+            new_norm = calGram(_target.candidates_xfs[min_distance_vector_index], _target.candidates_xfs[min_distance_vector_index], _params);
             for (i = 0; i < _params.limit_of_components; i++) {
                 distance_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(new_norm + _target.gram_matrix.at<cv::Vec<float, 2>>(i, i)[0] - 2 * gram_vector.at<cv::Vec<float, 2>>(0, i)[0], 0);
             }
@@ -1622,20 +1654,20 @@ void KTrackers::updateModels(vector<Mat> &xf, Mat &alphaf) {
         }
         else {
             // Case 4
-            _target.models_weight[min_distance_matrix_index_x] = _target.models_weight[min_distance_matrix_index_x] + _target.models_weight[min_distance_matrix_index_y];
-            mergeWeighted(_target.models_xf[min_distance_matrix_index_x], _target.models_xf[min_distance_matrix_index_y], _target.models_alphaf[min_distance_matrix_index_x], _target.models_alphaf[min_distance_matrix_index_y], 1 - _target.models_weight[min_distance_matrix_index_y] / _target.models_weight[min_distance_matrix_index_x], _target.models_weight[min_distance_matrix_index_y] / _target.models_weight[min_distance_matrix_index_x]);
-            _target.models_xf[min_distance_matrix_index_y] = xf;
-            _target.models_alphaf[min_distance_matrix_index_y] = alphaf;
-            _target.models_weight[min_distance_matrix_index_y] = _params.interp_factor;
+            _target.candidates_weights[min_distance_matrix_index_x] = _target.candidates_weights[min_distance_matrix_index_x] + _target.candidates_weights[min_distance_matrix_index_y];
+            mergeWeighted(_target.candidates_xfs[min_distance_matrix_index_x], _target.candidates_xfs[min_distance_matrix_index_y], _target.candidates_alphafs[min_distance_matrix_index_x], _target.candidates_alphafs[min_distance_matrix_index_y], 1 - _target.candidates_weights[min_distance_matrix_index_y] / _target.candidates_weights[min_distance_matrix_index_x], _target.candidates_weights[min_distance_matrix_index_y] / _target.candidates_weights[min_distance_matrix_index_x]);
+            _target.candidates_xfs[min_distance_matrix_index_y] = xf;
+            _target.candidates_alphafs[min_distance_matrix_index_y] = alphaf;
+            _target.candidates_weights[min_distance_matrix_index_y] = _params.interp_factor;
             // Case 4 modify gram matrix and distance matrix
             updateGramMatrix(gram_vector, min_distance_matrix_index_y);
             updateDistanceMatrix(distance_vector, min_distance_matrix_index_y);
             cv::Mat index_x_gram_vector(cv::Size(_params.limit_of_components, 1), CV_32FC2);
             cv::Mat index_x_distance_vector(cv::Size(_params.limit_of_components, 1), CV_32FC2);
-            float index_x_norm = calGram(_target.models_xf[min_distance_matrix_index_x], _target.models_xf[min_distance_matrix_index_x], _params);
+            float index_x_norm = calGram(_target.candidates_xfs[min_distance_matrix_index_x], _target.candidates_xfs[min_distance_matrix_index_x], _params);
 
             for (i = 0; i < _params.limit_of_components; i++) {
-                index_x_gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(_target.models_xf[min_distance_matrix_index_x], _target.models_xf[i], _params), 0);
+                index_x_gram_vector.at<cv::Vec<float, 2>>(0, i) = cv::Vec<float, 2>(calGram(_target.candidates_xfs[min_distance_matrix_index_x], _target.candidates_xfs[i], _params), 0);
             }
             index_x_gram_vector.at<cv::Vec<float, 2>>(0, min_distance_matrix_index_x) = cv::Vec<float, 2>(index_x_norm, 0);
             for (i = 0; i < _params.limit_of_components; i++) {
